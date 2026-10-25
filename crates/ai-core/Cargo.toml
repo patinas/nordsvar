@@ -1,0 +1,20 @@
+[package]
+name = "nordsvar-ai-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+async-trait = "0.1"
+nordsvar-tenancy = { path = "../tenancy" }
+serde = { workspace = true }
+thiserror = "2"
+tracing = "0.1"
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+proptest = "1"
+tokio = { workspace = true, features = ["macros", "rt"] }

@@ -1,0 +1,16 @@
+[package]
+name = "nordsvar-tenancy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = "2"
+uuid = { workspace = true }
+
+[dev-dependencies]
+proptest = "1"
+
+serde_json = { workspace = true }

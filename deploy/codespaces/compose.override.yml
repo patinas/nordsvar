@@ -1,0 +1,20 @@
+# Codespaces demo overlay, used by deploy/codespaces/setup.sh alongside the
+# standard self-host compose file. Adds the coturn TURN relay that lets
+# browser media reach LiveKit through the Codespaces port tunnel: the
+# tunnel carries TCP/TLS on 443 only, LiveKit's UDP media and raw ICE/TCP
+# are unreachable from browsers, so media relays through coturn instead.
+# coturn listens plain TCP on 7882; the tunnel terminates TLS in front of
+# it, and coturn relays UDP to LiveKit over the compose network.
+services:
+  turn:
+    image: coturn/coturn:4.6.2
+    command: >
+      -n --log-file=stdout --no-tls --no-dtls --no-cli
+      --listening-port=7882
+      --min-port=49200 --max-port=49250
+      --lt-cred-mech
+      --user=${TURN_USERNAME:?set in .env}:${TURN_CREDENTIAL:?set in .env}
+      --realm=nordsvar-codespaces
+    ports:
+      - "7882:7882"   # TURN over TCP, TLS-terminated by the tunnel
+    restart: unless-stopped

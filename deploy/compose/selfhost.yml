@@ -1,0 +1,154 @@
+# Nordsvar self-hosted single-node deployment (production-oriented).
+# Installed and managed by scripts/install.sh; all secrets come from the
+# .env file next to this file (chmod 600, generated locally at install).
+#
+# Data sovereignty: every service runs on this node. Postgres and Qdrant
+# hold their state in named volumes; no service needs outbound internet
+# access at runtime (images and model weights are mirrored ahead of time
+# for air-gapped installs - see docs/DATA-SOVEREIGNTY.md).
+
+name: nordsvar
+
+services:
+  nordsvar-api:
+    image: ${NORDSVAR_REGISTRY:-}nordsvar-api:${NORDSVAR_VERSION:-local}
+    build:
+      context: ${NORDSVAR_SRC:-.}
+      dockerfile: deploy/docker/api.Dockerfile
+    environment:
+      BIND_ADDR: "0.0.0.0:8080"
+      AUTH_MODE: ${AUTH_MODE:-local}
+      DATABASE_URL: "postgres://postgres:${POSTGRES_PASSWORD:?set in .env}@postgres:5432/nordsvar"
+      LIVEKIT_URL: "ws://livekit:7880"
+      # Client-facing URL for browser join tickets (tunnels, LB, DNS name).
+      # Empty keeps the internal URL - only right for same-host dev.
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-}
+      # TURN relay advertised in join tickets (tunnelled deployments only).
+      TURN_URL: ${TURN_URL:-}
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set in .env}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set in .env}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:?set in .env}
+      SETTINGS_KEY: ${SETTINGS_KEY:?set in .env}
+      # KB ingestion writes to the same Ollama + Qdrant the worker reads
+      # (per-tenant collections). Unset QDRANT_URL to fall back to
+      # in-memory ingestion (documents lost on restart - dev only).
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      EMBED_URL: ${EMBED_URL:-http://ollama:11434}
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+    restart: unless-stopped
+    # No published port: the web container proxies /v1 and /healthz.
+
+  nordsvar-ai-worker:
+    image: ${NORDSVAR_REGISTRY:-}nordsvar-ai-worker:${NORDSVAR_VERSION:-local}
+    build:
+      context: ${NORDSVAR_SRC:-.}
+      dockerfile: deploy/docker/ai-worker.Dockerfile
+    environment:
+      MEDIA_DRIVER: livekit
+      API_URL: "http://nordsvar-api:8080"
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:?set in .env}
+      LIVEKIT_URL: "ws://livekit:7880"
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set in .env}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set in .env}
+      QDRANT_URL: "http://qdrant:6333"
+      # Local model endpoints. The base profile has none running; point
+      # these at your model hosts (see docs/INSTALL.md profiles).
+      STT_URL: ${STT_URL:-http://stt:8000}
+      LLM_URL: ${LLM_URL:-http://ollama:11434}
+      TTS_URL: ${TTS_URL:-http://tts:5000}
+      EMBED_URL: ${EMBED_URL:-http://ollama:11434}
+    depends_on:
+      nordsvar-api:
+        condition: service_started
+      livekit:
+        condition: service_started
+    restart: unless-stopped
+
+  nordsvar-web:
+    image: ${NORDSVAR_REGISTRY:-}nordsvar-web:${NORDSVAR_VERSION:-local}
+    build:
+      context: ${NORDSVAR_SRC:-.}
+      dockerfile: deploy/docker/web.Dockerfile
+    ports:
+      - "${WEB_PORT:-8081}:80"
+    depends_on:
+      - nordsvar-api
+    restart: unless-stopped
+
+  livekit:
+    image: livekit/livekit-server:v1.13.6
+    # Keys come from .env (generated at install), not --dev mode.
+    command: ["--bind", "0.0.0.0", "--keys", "${LIVEKIT_API_KEY:?set in .env}: ${LIVEKIT_API_SECRET:?set in .env}"]
+    ports:
+      - "7880:7880"                  # HTTP/WebSocket signalling
+      - "7881:7881"                  # ICE/TCP fallback
+      - "50000-50100:50000-50100/udp" # RTC media
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: nordsvar
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nordsvar"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    # Not published to the host: only the API reaches it on the compose
+    # network. Backups: docker compose exec postgres pg_dump (RUNBOOK).
+
+  qdrant:
+    image: qdrant/qdrant:v1.15
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: unless-stopped
+    # Per-tenant collections; not published to the host.
+
+  # Optional local LLM/embeddings for the small-model profile. Production
+  # GPU serving (vLLM) runs on dedicated hosts; see docs/ARCHITECTURE.md.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-models"]
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+
+  # Speech-to-text: whisper.cpp server (Danish-tuned weights mirrored to
+  # ./models - see docs/INSTALL.md). Matches the worker's STT adapter.
+  stt:
+    image: ${NORDSVAR_REGISTRY:-}nordsvar-stt:${NORDSVAR_VERSION:-local}
+    build:
+      context: ${NORDSVAR_SRC:-.}
+      dockerfile: deploy/docker/stt-whisper.Dockerfile
+    profiles: ["local-models"]
+    volumes:
+      - "${NORDSVAR_MODELS_DIR:-./models}:/models:ro"
+    restart: unless-stopped
+
+  # Text-to-speech: Piper behind deploy/docker/tts_server.py (POST text ->
+  # WAV), matching the worker's TTS adapter.
+  tts:
+    image: ${NORDSVAR_REGISTRY:-}nordsvar-tts:${NORDSVAR_VERSION:-local}
+    build:
+      context: ${NORDSVAR_SRC:-.}
+      dockerfile: deploy/docker/tts-piper.Dockerfile
+    profiles: ["local-models"]
+    volumes:
+      - "${NORDSVAR_MODELS_DIR:-./models}:/models:ro"
+    restart: unless-stopped
+
+volumes:
+  pg-data:
+  qdrant-data:
+  ollama-models:

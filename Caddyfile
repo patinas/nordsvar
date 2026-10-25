@@ -1,0 +1,22 @@
+# Caddyfile for a Nordsvar self-host deployment.
+# Replace nordsvar.example.com with your own hostname (and set the email
+# below for Let's Encrypt registration) before starting Caddy.
+{
+	# email you@example.com
+}
+
+nordsvar.example.com {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "microphone=(self), camera=(self), display-capture=(self)"
+		-Server
+	}
+	reverse_proxy nordsvar-web:80
+}
+
+nordsvar.example.com:7880 {
+	reverse_proxy livekit:7880
+}

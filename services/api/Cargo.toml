@@ -1,0 +1,37 @@
+[package]
+name = "nordsvar-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+argon2 = "0.5"
+async-trait = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+axum = { workspace = true }
+jsonwebtoken = "9"
+nordsvar-ai-core = { path = "../../crates/ai-core" }
+nordsvar-kb-ingest = { path = "../../crates/kb-ingest" }
+nordsvar-tenancy = { path = "../../crates/tenancy" }
+serde = { workspace = true }
+sha2 = "0.10"
+serde_json = { workspace = true }
+thiserror = "2"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "sync"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid = { workspace = true }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "json", "macros"] }
+aes-gcm = { version = "0.10", features = ["getrandom"] }
+hex = "0.4"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "nordsvar-api"
+path = "src/main.rs"

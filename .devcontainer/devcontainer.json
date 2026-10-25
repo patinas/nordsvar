@@ -1,0 +1,31 @@
+{
+  "name": "Nordsvar demo (full stack)",
+  "image": "mcr.microsoft.com/devcontainers/universal:linux",
+  "forwardPorts": [
+    8081,
+    7880,
+    7882
+  ],
+  "portsAttributes": {
+    "8081": {
+      "label": "Nordsvar web",
+      "visibility": "private"
+    },
+    "7880": {
+      "label": "LiveKit signalling (WebSocket)",
+      "visibility": "private"
+    },
+    "7882": {
+      "label": "TURN media relay (TLS via tunnel)",
+      "visibility": "private"
+    }
+  },
+  "postCreateCommand": "bash deploy/codespaces/setup.sh",
+  "customizations": {
+    "codespaces": {
+      "openFiles": [
+        "deploy/codespaces/README.md"
+      ]
+    }
+  }
+}

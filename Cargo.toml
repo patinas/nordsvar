@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/media-livekit",
+    "services/api",
+    "services/ai-worker",
+    "crates/ai-core",
+    "crates/kb-ingest",
+    "crates/tenancy",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "LicenseRef-Proprietary" # pending D-001 in docs/DECISIONS.md
+
+[workspace.dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+uuid = { version = "1", features = ["v4", "serde"] }

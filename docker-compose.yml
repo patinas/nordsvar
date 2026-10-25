@@ -1,0 +1,146 @@
+# Nordsvar single-node deployment.
+# Everything here runs inside the enterprise network boundary. No service in
+# this file requires outbound internet access at runtime once images and model
+# weights are mirrored locally (see deploy/README.md).
+
+services:
+  nordsvar-api:
+    build:
+      context: .
+      dockerfile: deploy/docker/api.Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      BIND_ADDR: "0.0.0.0:8080"
+      DATABASE_URL: "postgres://postgres:devpassword-change-me@postgres:5432/nordsvar"
+      LIVEKIT_URL: "ws://livekit:7880"
+      LIVEKIT_API_KEY: "devkey"
+      LIVEKIT_API_SECRET: "devsecret-change-me"
+      QDRANT_URL: "http://qdrant:6333"
+      EMBED_URL: "http://ollama:11434"
+      # Fallback LLM for embed-widget text answers when the tenant has no
+      # external provider configured (see docs/EMBED.md).
+      LLM_URL: "http://ollama:11434"
+      LLM_MODEL: "llama3"
+    depends_on:
+      - postgres
+      - livekit
+      - qdrant
+
+  nordsvar-ai-worker:
+    build:
+      context: .
+      dockerfile: deploy/docker/ai-worker.Dockerfile
+    environment:
+      LIVEKIT_URL: "ws://livekit:7880"
+      STT_URL: "http://stt:8000"
+      LLM_URL: "http://ollama:11434"
+      TTS_URL: "http://tts:5000"
+      EMBED_URL: "http://ollama:11434"
+      QDRANT_URL: "http://qdrant:6333"
+    depends_on:
+      - livekit
+      - qdrant
+
+  nordsvar-web:
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+    ports:
+      - "8081:80"
+    depends_on:
+      - nordsvar-api
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --dev --bind 0.0.0.0
+    ports:
+      - "7880:7880"     # HTTP/WebSocket signalling
+      - "7881:7881"     # TCP fallback
+      - "50000-50100:50000-50100/udp"  # RTC media
+    # Dev keys only. Production installs get keys from the enterprise secret store.
+    environment:
+      LIVEKIT_KEYS: "devkey: devsecret-change-me"
+
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: "devpassword-change-me"
+      POSTGRES_DB: "nordsvar"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    # Session store, audit log, KB document registry. Encryption at rest is
+    # the operator's volume/disk responsibility (docs/SECURITY.md).
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"     # REST
+      - "6334:6334"     # gRPC
+    volumes:
+      - qdrant-data:/qdrant/storage
+    # Per-tenant collections: one collection per tenant, created by kb-ingest.
+
+  # Optional local model serving for development. Production uses dedicated
+  # GPU hosts with vLLM; see docs/ARCHITECTURE.md.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-models"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+
+  # Speech-to-text: whisper.cpp server (Danish-tuned weights mirrored to
+  # ./models - see docs/INSTALL.md). Matches the worker's STT adapter.
+  stt:
+    image: ${NORDSVAR_REGISTRY:-}nordsvar-stt:${NORDSVAR_VERSION:-local}
+    build:
+      context: .
+      dockerfile: deploy/docker/stt-whisper.Dockerfile
+    profiles: ["local-models"]
+    volumes:
+      - "./models:/models:ro"
+    restart: unless-stopped
+
+  # Text-to-speech: Piper behind deploy/docker/tts_server.py (POST text ->
+  # WAV), matching the worker's TTS adapter.
+  tts:
+    image: ${NORDSVAR_REGISTRY:-}nordsvar-tts:${NORDSVAR_VERSION:-local}
+    build:
+      context: .
+      dockerfile: deploy/docker/tts-piper.Dockerfile
+    profiles: ["local-models"]
+    volumes:
+      - "./models:/models:ro"
+    restart: unless-stopped
+
+  # Telephony bridge (docs/TELEPHONY.md). Not started by default:
+  #   docker compose --profile telephony up -d
+  # Requires a SIP trunk purchased from a provider by the operator; the
+  # credentials below are placeholders for the operator's secret store.
+  livekit-sip:
+    image: livekit/sip:latest
+    profiles: ["telephony"]
+    environment:
+      LIVEKIT_URL: "ws://livekit:7880"
+      LIVEKIT_API_KEY: "devkey"
+      LIVEKIT_API_SECRET: "devsecret-change-me"
+      SIP_LISTEN_ADDR: "0.0.0.0:5060"
+      # Set from the operator's secret store at activation:
+      # SIP_TRUNK_PROVIDER: "twilio"
+      # SIP_TRUNK_AUTH_USERNAME: "..."
+      # SIP_TRUNK_AUTH_PASSWORD: "..."
+    ports:
+      - "5060:5060"
+      - "5060:5060/udp"
+    depends_on:
+      - livekit
+
+volumes:
+  qdrant-data:
+  ollama-models:
+  pg-data:
+
